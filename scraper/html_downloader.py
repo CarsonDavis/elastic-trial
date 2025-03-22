@@ -1,9 +1,10 @@
 import aiohttp
 import asyncio
-import logging
 import time
 import random
 from typing import Dict, List, Any, Optional
+from logger.logger_interface import LoggerInterface
+from logger.console_logger import ConsoleLogger
 
 
 class AsyncHTMLDownloader:
@@ -16,6 +17,7 @@ class AsyncHTMLDownloader:
         retries: int = 3,
         retry_delay: float = 1.0,
         user_agent: str = "COSMOS-Pipeline/1.0",
+        logger: Optional[LoggerInterface] = None,
     ):
         """Initialize the HTML downloader.
 
@@ -25,6 +27,8 @@ class AsyncHTMLDownloader:
             retries: Maximum number of retry attempts for failed requests
             retry_delay: Base delay between retries (will be used with exponential backoff)
             user_agent: User-Agent header to use for requests
+            logger: External logger implementation (must implement LoggerInterface).
+                   If None, a ConsoleLogger will be created automatically.
         """
         self.semaphore = asyncio.Semaphore(concurrency_limit)
         self.timeout = timeout
@@ -32,16 +36,13 @@ class AsyncHTMLDownloader:
         self.retry_delay = retry_delay
         self.user_agent = user_agent
         self.session = None
-        self.logger = logging.getLogger(__name__)
 
-        # Configure logging
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        # Create default ConsoleLogger if no logger is provided
+        self.logger = (
+            logger
+            if logger is not None
+            else ConsoleLogger(service_name="html_downloader")
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
 
     async def _ensure_session(self):
         """Ensure that an aiohttp session exists."""
@@ -65,7 +66,12 @@ class AsyncHTMLDownloader:
         """
         url = url_metadata.get("url")
         if not url:
-            self.logger.error(f"URL missing in metadata: {url_metadata}")
+            error_msg = f"URL missing in metadata: {url_metadata}"
+            await self.logger.error(error_msg, metadata=url_metadata)
+            await self.logger.log_failed_download(
+                url_metadata=url_metadata, error="Missing URL in metadata"
+            )
+
             return {
                 **url_metadata,
                 "html": None,
@@ -91,12 +97,18 @@ class AsyncHTMLDownloader:
                         delay = self.retry_delay * (
                             2 ** (attempt - 1)
                         ) + random.uniform(0, 0.5)
-                        self.logger.info(
-                            f"Retry {attempt}/{self.retries} for {url} after {delay:.2f}s delay"
+                        await self.logger.info(
+                            f"Retry {attempt}/{self.retries} for {url} after {delay:.2f}s delay",
+                            url=url,
+                            metadata={
+                                "attempt": attempt,
+                                "max_retries": self.retries,
+                                "delay": delay,
+                            },
                         )
                         await asyncio.sleep(delay)
 
-                    self.logger.info(f"Downloading {url}")
+                    await self.logger.info(f"Downloading {url}", url=url)
                     start_time = time.time()
 
                     async with self.session.get(
@@ -107,8 +119,15 @@ class AsyncHTMLDownloader:
                         if response.status == 200:
                             # Success - get the HTML content
                             html = await response.text()
-                            self.logger.info(
-                                f"Successfully downloaded {url} ({len(html)} bytes, {elapsed:.2f}s)"
+                            success_msg = f"Successfully downloaded {url} ({len(html)} bytes, {elapsed:.2f}s)"
+                            await self.logger.info(
+                                success_msg,
+                                url=url,
+                                status=str(response.status),
+                                metadata={
+                                    "size_bytes": len(html),
+                                    "download_time": elapsed,
+                                },
                             )
 
                             result["html"] = html
@@ -121,7 +140,12 @@ class AsyncHTMLDownloader:
                             error_msg = (
                                 f"HTTP {response.status} for {url}: {error_text[:200]}"
                             )
-                            self.logger.warning(error_msg)
+                            await self.logger.warning(
+                                error_msg,
+                                url=url,
+                                status=str(response.status),
+                                error=error_text[:200],
+                            )
 
                             # Update result with error details
                             result["download_status"] = "error"
@@ -130,32 +154,52 @@ class AsyncHTMLDownloader:
 
                             # Don't retry for certain status codes
                             if response.status in (404, 403, 401):
-                                self.logger.warning(
-                                    f"Not retrying {url} due to status code {response.status}"
+                                await self.logger.warning(
+                                    f"Not retrying {url} due to status code {response.status}",
+                                    url=url,
+                                    status=str(response.status),
                                 )
+
+                                await self.logger.log_failed_download(
+                                    url_metadata=url_metadata,
+                                    error=error_msg,
+                                    status_code=response.status,
+                                )
+
                                 return result
 
                             # For other error codes, continue to retry
 
                 except asyncio.TimeoutError:
-                    self.logger.warning(f"Timeout downloading {url}")
+                    error_msg = f"Timeout downloading {url}"
+                    await self.logger.warning(
+                        error_msg, url=url, error=f"Timeout after {self.timeout}s"
+                    )
                     result["download_status"] = "error"
                     result["download_error"] = f"Timeout after {self.timeout}s"
 
                 except aiohttp.ClientError as e:
-                    self.logger.warning(f"Error downloading {url}: {str(e)}")
+                    error_msg = f"Error downloading {url}: {str(e)}"
+                    await self.logger.warning(error_msg, url=url, error=str(e))
                     result["download_status"] = "error"
                     result["download_error"] = f"Client error: {str(e)}"
 
                 except Exception as e:
-                    self.logger.error(
-                        f"Unexpected error downloading {url}: {str(e)}", exc_info=True
-                    )
+                    error_msg = f"Unexpected error downloading {url}: {str(e)}"
+                    await self.logger.error(error_msg, url=url, error=str(e))
                     result["download_status"] = "error"
                     result["download_error"] = f"Unexpected error: {str(e)}"
 
             # If we get here, all retries failed
-            self.logger.error(f"All {self.retries + 1} attempts failed for {url}")
+            all_failed_msg = f"All {self.retries + 1} attempts failed for {url}"
+            await self.logger.error(all_failed_msg, url=url)
+
+            await self.logger.log_failed_download(
+                url_metadata=url_metadata,
+                error=result.get("download_error", "All retry attempts failed"),
+                status_code=result.get("status_code"),
+            )
+
             return result
 
     async def download_batch(
@@ -172,10 +216,13 @@ class AsyncHTMLDownloader:
         await self._ensure_session()
 
         if not url_metadata_list:
-            self.logger.warning("Empty URL batch provided")
+            await self.logger.warning("Empty URL batch provided")
             return []
 
-        self.logger.info(f"Downloading batch of {len(url_metadata_list)} URLs")
+        await self.logger.info(
+            f"Downloading batch of {len(url_metadata_list)} URLs",
+            metadata={"batch_size": len(url_metadata_list)},
+        )
         start_time = time.time()
 
         # Create download tasks for all URLs
@@ -188,7 +235,10 @@ class AsyncHTMLDownloader:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                self.logger.error(f"Unhandled exception downloading URL: {str(result)}")
+                error_msg = f"Unhandled exception downloading URL: {str(result)}"
+                await self.logger.error(
+                    error_msg, url=url_metadata_list[i].get("url"), error=str(result)
+                )
 
                 # Create an error result using the original metadata
                 error_result = {
@@ -197,6 +247,12 @@ class AsyncHTMLDownloader:
                     "download_status": "error",
                     "download_error": f"Unhandled exception: {str(result)}",
                 }
+
+                await self.logger.log_failed_download(
+                    url_metadata=url_metadata_list[i],
+                    error=f"Unhandled exception: {str(result)}",
+                )
+
                 processed_results.append(error_result)
             else:
                 processed_results.append(result)
@@ -205,22 +261,34 @@ class AsyncHTMLDownloader:
         success_count = sum(
             1 for r in processed_results if r.get("download_status") == "success"
         )
+        failed_count = len(processed_results) - success_count
 
-        self.logger.info(
-            f"Completed batch download: {success_count}/{len(url_metadata_list)} successful in {elapsed:.2f}s"
+        await self.logger.info(
+            f"Completed batch download: {success_count}/{len(url_metadata_list)} successful in {elapsed:.2f}s",
+            metadata={
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "total_count": len(url_metadata_list),
+                "elapsed_time": elapsed,
+            },
         )
 
         return processed_results
 
     async def close(self):
-        """Close the aiohttp session."""
+        """Close the aiohttp session and logger."""
         if self.session is not None:
             await self.session.close()
             self.session = None
 
+        # Close the logger
+        await self.logger.close()
+
 
 # Example usage
 async def main():
+    import asyncio
+
     # Create sample URL metadata (normally this would come from CosmosAPIClient)
     sample_urls = [
         {
@@ -265,7 +333,7 @@ async def main():
         },
     ]
 
-    # Initialize downloader
+    # Initialize downloader (will use ConsoleLogger by default)
     downloader = AsyncHTMLDownloader(concurrency_limit=5, timeout=10, retries=2)
 
     try:
