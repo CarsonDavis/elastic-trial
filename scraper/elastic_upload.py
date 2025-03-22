@@ -1,9 +1,10 @@
 import asyncio
-import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from elasticsearch import AsyncElasticsearch
 from elasticsearch.helpers import async_bulk
+from logger.logger_interface import LoggerInterface
+from logger.console_logger import ConsoleLogger
 
 
 class ElasticsearchClient:
@@ -17,6 +18,7 @@ class ElasticsearchClient:
         max_retries: int = 3,
         retry_on_timeout: bool = True,
         timeout: int = 30,
+        logger: Optional[LoggerInterface] = None,
     ):
         """Initialize the Elasticsearch client.
 
@@ -27,12 +29,13 @@ class ElasticsearchClient:
             max_retries: Maximum number of retry attempts for failed operations
             retry_on_timeout: Whether to retry on timeout
             timeout: Request timeout in seconds
+            logger: External logger implementation (must implement LoggerInterface).
+                   If None, a ConsoleLogger will be created automatically.
         """
         self.host = host
         self.index_name = index_name
         self.api_key = api_key
         self.client = None
-        self.logger = logging.getLogger(__name__)
 
         # Client options
         self.client_options = {
@@ -45,14 +48,12 @@ class ElasticsearchClient:
         if api_key:
             self.client_options["api_key"] = api_key
 
-        # Configure logging
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        # Create default ConsoleLogger if no logger is provided
+        self.logger = (
+            logger
+            if logger is not None
+            else ConsoleLogger(service_name="elastic_upload")
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
 
     async def _ensure_client(self):
         """Ensure that an Elasticsearch client exists."""
@@ -60,16 +61,19 @@ class ElasticsearchClient:
             self.client = AsyncElasticsearch(**self.client_options)
 
     def _prepare_document(self, doc: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare a document for indexing in Elasticsearch."""
+        """Prepare a document for indexing in Elasticsearch.
+
+        Removes download-related metadata that should only be in logs.
+        """
         # Extract key fields from the document
         url = doc.get("url", "")
         title = doc.get("title", "")
         document_type = doc.get("document_type", "")
         html_content = doc.get("html", "")
         tree_root = doc.get("tree_root", "")
-        download_status = doc.get("download_status", "unknown")
 
         # Create a document structure optimized for search
+        # Note: No download-related fields included
         prepared_doc = {
             # Core metadata
             "url": url,
@@ -79,15 +83,10 @@ class ElasticsearchClient:
             "file_extension": doc.get("file_extension", ""),
             # Content
             "html_content": html_content,
-            # Download metadata
-            "download_status": download_status,
-            "status_code": doc.get("status_code"),
-            "download_error": doc.get("download_error"),
-            "download_time": doc.get("download_time"),
             # Processing metadata
-            "indexed_at": datetime.utcnow(),  # The client handles date serialization
+            "indexed_at": datetime.utcnow(),
             "processing_status": "raw",
-            # Original metadata preserved
+            # Original metadata preserved, excluding download-related fields
             "original_metadata": {
                 k: v
                 for k, v in doc.items()
@@ -111,10 +110,10 @@ class ElasticsearchClient:
 
         exists = await self.client.indices.exists(index=self.index_name)
         if exists:
-            self.logger.info(f"Index {self.index_name} already exists")
+            await self.logger.info(f"Index {self.index_name} already exists")
             return
 
-        # Define index mappings
+        # Define index mappings without settings that aren't available in serverless mode
         mappings = {
             "mappings": {
                 "properties": {
@@ -124,50 +123,99 @@ class ElasticsearchClient:
                     "tree_root": {"type": "keyword"},
                     "file_extension": {"type": "keyword"},
                     "html_content": {"type": "text", "analyzer": "standard"},
-                    "download_status": {"type": "keyword"},
-                    "status_code": {"type": "integer"},
-                    "download_error": {"type": "text", "analyzer": "standard"},
-                    "download_time": {"type": "float"},
                     "indexed_at": {"type": "date"},
                     "processing_status": {"type": "keyword"},
                 }
-            },
-            "settings": {"number_of_shards": 1, "number_of_replicas": 1},
+            }
+            # No settings for number_of_shards or number_of_replicas in serverless mode
         }
 
         try:
             await self.client.indices.create(index=self.index_name, body=mappings)
-            self.logger.info(f"Successfully created index {self.index_name}")
+            await self.logger.info(f"Successfully created index {self.index_name}")
         except Exception as e:
-            self.logger.error(f"Failed to create index: {str(e)}")
+            await self.logger.error(f"Failed to create index: {str(e)}", error=str(e))
             raise
 
     async def _generate_bulk_actions(self, documents):
-        """Generate actions for bulk indexing."""
+        """Generate actions for bulk indexing, filtering out failed downloads."""
+        successful_docs = 0
+        skipped_docs = 0
+
         for doc in documents:
-            if doc.get("download_status") == "success" and doc.get("html"):
+            url = doc.get("url", "unknown")
+            download_status = doc.get("download_status", "unknown")
+
+            # Only index documents that were successfully downloaded and have HTML content
+            if download_status == "success" and doc.get("html"):
+                successful_docs += 1
                 yield {
                     "_index": self.index_name,
                     "_source": self._prepare_document(doc),
                 }
             else:
-                self.logger.warning(
-                    f"Skipping document with URL {doc.get('url')} due to download status {doc.get('download_status')}"
+                skipped_docs += 1
+                # Log skipped documents
+                error_reason = doc.get("download_error", "No HTML content")
+                await self.logger.warning(
+                    f"Skipping document indexing for {url} due to status {download_status}",
+                    url=url,
+                    status=download_status,
+                    error=error_reason,
+                    metadata={"skipped": True},
                 )
+
+        await self.logger.info(
+            f"Prepared {successful_docs} documents for indexing, skipped {skipped_docs} failed documents",
+            metadata={"successful": successful_docs, "skipped": skipped_docs},
+        )
 
     async def index_batch(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Index a batch of documents in Elasticsearch using the bulk API."""
         if not documents:
-            self.logger.warning("Empty document batch provided for indexing")
-            return {"indexed": 0, "failed": 0, "errors": []}
+            await self.logger.warning("Empty document batch provided for indexing")
+            return {"indexed": 0, "failed": 0, "skipped": 0, "errors": []}
 
         await self._ensure_client()
         await self.ensure_index_exists()
 
-        self.logger.info(f"Indexing batch of {len(documents)} documents")
+        # Pre-filter to count successful and failed documents
+        successful_documents = [
+            doc
+            for doc in documents
+            if doc.get("download_status") == "success" and doc.get("html")
+        ]
+        skipped_documents = [
+            doc
+            for doc in documents
+            if doc.get("download_status") != "success" or not doc.get("html")
+        ]
+
+        await self.logger.info(
+            f"Processing batch with {len(documents)} total documents: "
+            f"{len(successful_documents)} successful, {len(skipped_documents)} failed/skipped",
+            metadata={
+                "total_documents": len(documents),
+                "successful_documents": len(successful_documents),
+                "skipped_documents": len(skipped_documents),
+            },
+        )
+
+        # If no successful documents, return early
+        if not successful_documents:
+            await self.logger.warning(
+                "No documents to index after filtering out failed downloads",
+                metadata={"skipped_documents": len(skipped_documents)},
+            )
+            return {
+                "indexed": 0,
+                "failed": 0,
+                "skipped": len(skipped_documents),
+                "errors": [],
+            }
 
         try:
-            # Use the async_bulk helper
+            # Use the async_bulk helper with generator that filters out failed downloads
             success, errors = await async_bulk(
                 client=self.client,
                 actions=self._generate_bulk_actions(documents),
@@ -179,32 +227,54 @@ class ElasticsearchClient:
             # Log errors if any
             if errors:
                 for error in errors[:5]:  # Log only the first few errors
-                    self.logger.error(f"Indexing error: {error}")
+                    await self.logger.error(
+                        f"Indexing error: {error}", error=str(error)
+                    )
 
-            self.logger.info(
-                f"Indexed {success} documents successfully, {len(errors)} failed"
+            await self.logger.info(
+                f"Indexing completed: {success} documents indexed successfully, "
+                f"{len(errors)} indexing errors, {len(skipped_documents)} skipped due to download failure",
+                metadata={
+                    "indexed": success,
+                    "indexing_errors": len(errors),
+                    "skipped": len(skipped_documents),
+                },
             )
 
             return {
                 "indexed": success,
                 "failed": len(errors),
-                "total": success + len(errors),
+                "skipped": len(skipped_documents),
+                "total": len(documents),
                 "errors": errors,
             }
 
         except Exception as e:
-            self.logger.error(f"Error during bulk indexing: {str(e)}", exc_info=True)
+            await self.logger.error(
+                f"Error during bulk indexing: {str(e)}", error=str(e)
+            )
             raise
 
     async def close(self):
-        """Close the Elasticsearch client."""
+        """Close the Elasticsearch client and logger."""
         if self.client is not None:
             await self.client.close()
             self.client = None
 
+        # Close the logger
+        await self.logger.close()
+
 
 # Example usage
 async def main():
+    import os
+
+    # Get API key from environment variable
+    es_api_key = os.environ.get("ELASTIC_API_KEY")
+    if not es_api_key:
+        print("Warning: ELASTIC_API_KEY environment variable not set. Using demo mode.")
+        es_api_key = "demo_key"
+
     # Sample documents (normally these would come from the HTML downloader)
     sample_docs = [
         {
@@ -233,23 +303,27 @@ async def main():
         },
     ]
 
-    # Initialize the client
+    # Initialize the client (will use ConsoleLogger by default)
     client = ElasticsearchClient(
         host="https://my-elasticsearch-project-ce58cf.es.us-east-1.aws.elastic.cloud:443",
         index_name="sde_index_custom_scraper",
-        api_key="your_api_key_here",  # Replace with actual API key
+        api_key=es_api_key,
     )
 
     try:
         # Index the sample documents
+        print("\nStarting indexing process...")
         result = await client.index_batch(sample_docs)
 
         # Print results
-        print(
-            f"Indexing completed: {result['indexed']} indexed, {result.get('failed', 0)} failed"
-        )
+        print("\nIndexing Summary:")
+        print(f"- Total documents processed: {result['total']}")
+        print(f"- Successfully indexed: {result['indexed']}")
+        print(f"- Failed during indexing: {result['failed']}")
+        print(f"- Skipped due to download failure: {result['skipped']}")
+
         if result.get("errors"):
-            print(f"First error: {result['errors'][0]}")
+            print(f"\nFirst indexing error: {result['errors'][0]}")
 
     finally:
         await client.close()
