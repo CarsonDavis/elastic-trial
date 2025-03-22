@@ -1,7 +1,10 @@
 import aiohttp
 import asyncio
 import logging
-from typing import Dict, List, Any, AsyncGenerator
+from typing import Dict, List, Any, AsyncGenerator, Optional
+from logger.logger_interface import LoggerInterface
+from logger.elasticsearch_logger import ElasticsearchLogger
+from logger.console_logger import ConsoleLogger
 
 
 class CosmosAPIClient:
@@ -10,25 +13,43 @@ class CosmosAPIClient:
     def __init__(
         self,
         base_url: str = "https://sde-indexing-helper.nasa-impact.net/candidate-urls-api",
+        logger: Optional[LoggerInterface] = None,
     ):
-        """Initialize the COSMOS API client."""
+        """Initialize the COSMOS API client.
+
+        Args:
+            base_url: Base URL for the COSMOS API
+            logger: External logger implementation (must implement LoggerInterface)
+        """
         self.base_url = base_url.rstrip("/")
         self.session = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
 
-        # Configure logging
+        # Set up standard Python logger as fallback
+        self.std_logger = logging.getLogger(__name__)
         handler = logging.StreamHandler()
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        self.std_logger.addHandler(handler)
+        self.std_logger.setLevel(logging.INFO)
 
     async def _ensure_session(self):
         """Ensure that an aiohttp session exists."""
         if self.session is None:
             self.session = aiohttp.ClientSession()
+
+    async def _log(self, level: str, message: str, **kwargs):
+        """Log using the provided logger or fallback to standard logging."""
+        # Standard logging as fallback
+        log_method = getattr(self.std_logger, level.lower(), self.std_logger.info)
+        log_method(message)
+
+        # Use external logger if provided
+        if self.logger:
+            logger_method = getattr(self.logger, level.lower(), self.logger.info)
+            await logger_method(message, **kwargs)
 
     async def stream_collection_urls(
         self, collection_name: str, batch_size: int = 100
@@ -48,7 +69,7 @@ class CosmosAPIClient:
         await self._ensure_session()
 
         endpoint = f"{self.base_url}/{collection_name}/"
-        self.logger.info(f"Streaming URLs from endpoint: {endpoint}")
+        await self._log("info", f"Streaming URLs from endpoint: {endpoint}")
 
         next_page_url = f"{endpoint}?page_size={batch_size}"
         page_num = 1
@@ -56,13 +77,17 @@ class CosmosAPIClient:
 
         while next_page_url:
             try:
-                self.logger.info(f"Fetching page {page_num}: {next_page_url}")
+                await self._log("info", f"Fetching page {page_num}: {next_page_url}")
 
                 async with self.session.get(next_page_url) as response:
                     if response.status != 200:
                         text = await response.text()
-                        self.logger.error(
-                            f"Error response ({response.status}): {text[:500]}"
+                        error_msg = f"Error response ({response.status}): {text[:500]}"
+                        await self._log(
+                            "error",
+                            error_msg,
+                            status=str(response.status),
+                            url=next_page_url,
                         )
                         response.raise_for_status()
 
@@ -72,12 +97,19 @@ class CosmosAPIClient:
                     if "results" in data and data["results"]:
                         results = data["results"]
                         total_yielded += len(results)
-                        self.logger.info(
-                            f"Yielding batch of {len(results)} URLs, total so far: {total_yielded}"
+                        await self._log(
+                            "info",
+                            f"Yielding batch of {len(results)} URLs, total so far: {total_yielded}",
+                            metadata={
+                                "batch_size": len(results),
+                                "total_urls": total_yielded,
+                            },
                         )
                         yield results
                     else:
-                        self.logger.warning("No results in current page")
+                        await self._log(
+                            "warning", "No results in current page", url=next_page_url
+                        )
                         break
 
                     # Get next page URL if it exists
@@ -85,10 +117,15 @@ class CosmosAPIClient:
                     page_num += 1
 
             except aiohttp.ClientError as e:
-                self.logger.error(f"Error fetching URLs: {str(e)}")
+                error_msg = f"Error fetching URLs: {str(e)}"
+                await self._log("error", error_msg, url=next_page_url, error=str(e))
                 raise
 
-        self.logger.info(f"Completed streaming a total of {total_yielded} URLs")
+        await self._log(
+            "info",
+            f"Completed streaming a total of {total_yielded} URLs",
+            metadata={"total_urls": total_yielded},
+        )
 
     async def close(self):
         """Close the aiohttp session."""
@@ -96,50 +133,75 @@ class CosmosAPIClient:
             await self.session.close()
             self.session = None
 
+        # No need to close the logger here, as it's managed externally
 
-# Example usage demonstrating streaming approach
-async def main():
-    # Create and configure the client
-    client = CosmosAPIClient()
+
+async def example_usage():
+    import asyncio
+    import os
+    from logger.elasticsearch_logger import ElasticsearchLogger
+    from logger.console_logger import ConsoleLogger
+
+    # Get configuration from environment variables
+    es_host = os.getenv(
+        "ES_HOST",
+        "https://my-elasticsearch-project-ce58cf.es.us-east-1.aws.elastic.cloud:443",
+    )
+    es_api_key = os.getenv("ES_API_KEY")
+    cosmos_api_url = os.getenv(
+        "COSMOS_API_URL",
+        "https://sde-indexing-helper.nasa-impact.net/candidate-urls-api",
+    )
+
+    # Choose which logger to use based on environment variable
+    logger_type = os.getenv("LOGGER_TYPE", "console").lower()
+
+    if logger_type == "elasticsearch" and es_host and es_api_key:
+        print("Using Elasticsearch logger")
+        # Create Elasticsearch logger
+        logger = ElasticsearchLogger(
+            host=es_host,
+            index_prefix="sde_logs",
+            service_name="cosmos_api",
+            api_key=es_api_key,
+        )
+    else:
+        print("Using Console logger")
+        # Create console logger
+        logger = ConsoleLogger(service_name="cosmos_api", log_level="INFO")
+
+    # Create the COSMOS API client with the chosen logger
+    # No need to import CosmosAPIClient as we're already in that file
+    cosmos_client = CosmosAPIClient(base_url=cosmos_api_url, logger=logger)
 
     try:
-        # Stream URLs for the IAU Minor Planet System collection
-        collection_endpoint = "iau_minor_planet_system"
+        # Use the client to fetch data from a collection
+        collection_name = "iau_minor_planet_system"
+        batch_size = 20
+        batch_count = 0
 
-        # Counter for demonstration
-        total_processed = 0
-        first_url_shown = False
+        print(f"Fetching data from collection: {collection_name}")
 
-        # Process URLs in batches
-        async for url_batch in client.stream_collection_urls(collection_endpoint):
-            # Here you would pass each batch to the next stage of the pipeline
-            # instead of accumulating all URLs in memory
+        # Process a few batches as an example
+        async for batch in cosmos_client.stream_collection_urls(
+            collection_name, batch_size
+        ):
+            batch_count += 1
+            print(f"Received batch {batch_count} with {len(batch)} URLs")
 
-            batch_size = len(url_batch)
-            total_processed += batch_size
+            # Just process the first 3 batches as an example
+            if batch_count >= 3:
+                break
 
-            # Just for demo, show the first URL object
-            if not first_url_shown and batch_size > 0:
-                print("\nFirst URL object in first batch:")
-                print(f"URL: {url_batch[0]['url']}")
-                print(f"Title: {url_batch[0]['title']}")
-                print(f"Document Type: {url_batch[0]['document_type']}")
-                print(f"File Extension: {url_batch[0]['file_extension']}")
-                print(f"Tree Root: {url_batch[0]['tree_root']}")
-                print(f"TDAMM Tags: {url_batch[0]['tdamm_tag']}")
-                first_url_shown = True
+        print(f"Processed {batch_count} batches")
 
-            print(
-                f"Processed batch of {batch_size} URLs, running total: {total_processed}"
-            )
-
-            # Here you would process each batch
-            # For example: await process_url_batch(url_batch)
-
-        print(f"\nTotal URLs processed: {total_processed}")
     finally:
-        await client.close()
+        # Close connections
+        await cosmos_client.close()
+        await logger.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import asyncio
+
+    asyncio.run(example_usage())
