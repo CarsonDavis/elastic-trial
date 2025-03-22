@@ -5,6 +5,7 @@ from elasticsearch import AsyncElasticsearch
 from elasticsearch.helpers import async_bulk
 from logger.logger_interface import LoggerInterface
 from logger.console_logger import ConsoleLogger
+import hashlib
 
 
 class ElasticsearchClient:
@@ -60,11 +61,23 @@ class ElasticsearchClient:
         if self.client is None:
             self.client = AsyncElasticsearch(**self.client_options)
 
-    def _prepare_document(self, doc: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare a document for indexing in Elasticsearch.
+    def _get_document_id(self, doc: Dict[str, Any]) -> str:
+        """Generate a unique document ID based on the URL.
 
-        Removes download-related metadata that should only be in logs.
+        This ensures that documents with the same URL will overwrite each other,
+        keeping only the most recent version.
         """
+        url = doc.get("url", "")
+        if not url:
+            # Generate a random ID if URL is missing
+            return hashlib.md5(str(datetime.utcnow().timestamp()).encode()).hexdigest()
+
+        # Use the URL directly as the document ID
+        # We URL-encode or hash it to avoid special characters issues
+        return hashlib.md5(url.encode()).hexdigest()
+
+    def _prepare_document(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare a document for indexing in Elasticsearch."""
         # Extract key fields from the document
         url = doc.get("url", "")
         title = doc.get("title", "")
@@ -72,8 +85,10 @@ class ElasticsearchClient:
         html_content = doc.get("html", "")
         tree_root = doc.get("tree_root", "")
 
+        # Get text content if processed by HTMLProcessor
+        text_content = doc.get("text_content", "")
+
         # Create a document structure optimized for search
-        # Note: No download-related fields included
         prepared_doc = {
             # Core metadata
             "url": url,
@@ -83,9 +98,11 @@ class ElasticsearchClient:
             "file_extension": doc.get("file_extension", ""),
             # Content
             "html_content": html_content,
+            "text_content": text_content,
             # Processing metadata
             "indexed_at": datetime.utcnow(),
-            "processing_status": "raw",
+            "last_scraped": datetime.utcnow(),
+            "processing_status": doc.get("processing_status", "raw"),
             # Original metadata preserved, excluding download-related fields
             "original_metadata": {
                 k: v
@@ -94,6 +111,7 @@ class ElasticsearchClient:
                 not in [
                     "html",
                     "html_content",
+                    "text_content",
                     "download_status",
                     "status_code",
                     "download_error",
@@ -113,21 +131,22 @@ class ElasticsearchClient:
             await self.logger.info(f"Index {self.index_name} already exists")
             return
 
-        # Define index mappings without settings that aren't available in serverless mode
+        # Define index mappings
         mappings = {
             "mappings": {
                 "properties": {
-                    "url": {"type": "keyword"},
+                    "url": {"type": "keyword"},  # Keyword for exact matches
                     "title": {"type": "text", "analyzer": "standard"},
                     "document_type": {"type": "keyword"},
                     "tree_root": {"type": "keyword"},
                     "file_extension": {"type": "keyword"},
                     "html_content": {"type": "text", "analyzer": "standard"},
+                    "text_content": {"type": "text", "analyzer": "standard"},
                     "indexed_at": {"type": "date"},
+                    "last_scraped": {"type": "date"},
                     "processing_status": {"type": "keyword"},
                 }
             }
-            # No settings for number_of_shards or number_of_replicas in serverless mode
         }
 
         try:
@@ -149,8 +168,12 @@ class ElasticsearchClient:
             # Only index documents that were successfully downloaded and have HTML content
             if download_status == "success" and doc.get("html"):
                 successful_docs += 1
+                # Generate a document ID based on URL to ensure uniqueness
+                doc_id = self._get_document_id(doc)
+
                 yield {
                     "_index": self.index_name,
+                    "_id": doc_id,  # Using URL-based ID for uniqueness
                     "_source": self._prepare_document(doc),
                 }
             else:
