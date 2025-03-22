@@ -79,6 +79,10 @@ class AsyncHTMLDownloader:
                 "download_error": "Missing URL in metadata",
             }
 
+        # Add a small random delay before each request to avoid overwhelming the server
+        # This helps prevent 429 Too Many Requests errors
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
         # Use semaphore to limit concurrent connections
         async with self.semaphore:
             await self._ensure_session()
@@ -151,6 +155,38 @@ class AsyncHTMLDownloader:
                             result["download_status"] = "error"
                             result["status_code"] = response.status
                             result["download_error"] = error_msg
+
+                            # Special handling for 429 Too Many Requests
+                            if response.status == 429:
+                                # Get retry-after header if available, or use a longer backoff
+                                retry_after = response.headers.get("Retry-After")
+                                if retry_after and retry_after.isdigit():
+                                    delay = int(retry_after) + random.uniform(1.0, 3.0)
+                                else:
+                                    # Use a longer exponential backoff for rate limiting
+                                    delay = self.retry_delay * (
+                                        2**attempt
+                                    ) + random.uniform(5.0, 15.0)
+
+                                await self.logger.warning(
+                                    f"Rate limited (429) for {url}. Waiting {delay:.2f}s before retry",
+                                    url=url,
+                                    status="429",
+                                    metadata={"delay": delay},
+                                )
+
+                                # Only return if this is the last attempt
+                                if attempt >= self.retries:
+                                    await self.logger.log_failed_download(
+                                        url_metadata=url_metadata,
+                                        error=f"Rate limited: {error_msg}",
+                                        status_code=response.status,
+                                    )
+                                    return result
+
+                                # Otherwise wait the calculated delay
+                                await asyncio.sleep(delay)
+                                continue  # Skip to next retry attempt
 
                             # Don't retry for certain status codes
                             if response.status in (404, 403, 401):
