@@ -68,7 +68,6 @@ class ElasticsearchLogger(LoggerInterface):
             self.logger.info(f"Log index {self.index_name} already exists")
             return
 
-        # Define index mappings for logs
         mappings = {
             "mappings": {
                 "properties": {
@@ -81,8 +80,7 @@ class ElasticsearchLogger(LoggerInterface):
                     "error": {"type": "text", "analyzer": "standard"},
                     "metadata": {"type": "object", "enabled": True},
                 }
-            },
-            "settings": {"number_of_shards": 1, "number_of_replicas": 1},
+            }
         }
 
         try:
