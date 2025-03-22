@@ -1,0 +1,1 @@
+This folder contains the files used by the hour long tutorial at https://www.elastic.co/virtual-events/getting-started-elasticsearch. It's a pretty decent overview of the basic Elastic Search functions, but it does *not* cover any modern LLM or vectorizer workflows.

@@ -1,0 +1,847 @@
+# Getting Started with Elasticsearch Demo
+#
+# Contents
+#
+# 1. JSON Documents
+# 2. CRUD - Create / Read / Update / Delete
+# a. Create
+# - Different ways to insert/create an index
+# - Bulk indexing documents
+# b. Read
+# - Basic searches
+# - Intermediate searches
+# - Sample SQL query in Elasticsearch
+# - Aggregations
+# - Sample geo search
+# c. Update
+# - Updating documents
+# d. Delete
+# - Deleting documents
+# 3. Mappings
+# 4. Analyzers
+# 
+#
+# This is the Kibana Dev tools console. We'll use this to interact with Elasticsearch if you prefer you can use curl or another rest API client like Postman.
+#
+# A document can have many fields with values
+# {
+#  "name" : "Elastic",
+#  ...
+#  <field> : <value>
+# }
+#
+# {
+#  "name" : "Elastic",
+#  "location" : {
+#     "state" : "Co",
+#	  "zipcode" : 80006
+#   }
+# }
+#
+# And each value must be one of 6 types to be valid JSON (string, number, object, array, boolean, null)
+# http://www.json.org/
+# Let's index our first JSON document!
+# As mentioned before, when we say index, we mean both as a noun and as an adjective. We are puting the document in Elasticsearch and storing it
+# We'll be using some different data throughout this demo. In the registration web page of this webinar you'll see a few files that I'll be references to. The first document comes from reviews from a restaurant around the San Fransisco area
+#
+
+POST /michelin/_doc
+{"name": "Kilian Stuba",
+ "year": "2019",
+ "pin": {
+   "location": {
+     "lat": "47.34858",
+     "lon": "10.17114"
+     }
+   },
+  "city": "Kleinwalsertal",
+  "region": "Austria",
+  "zipCode": "87568",
+  "cuisine": "Creative",
+  "price": "$$$$$",
+  "url": "https://guide.michelin.com/at/en/vorarlberg/kleinwalsertal/restaurant/kilian-stuba",
+  "star": "1"
+}
+
+#
+# See the structure of the JSON document, there is a geopoint, dates, and numbers
+# Let's search the index using a GET command
+
+GET /michelin/_search
+
+# We'll dive deeper into the search API soon, for now, let's focus on indexing documents
+# A lot just happened, let's discuss
+# Elasticsearch uses a REST API, and it matters whether we use POST vs PUT
+# PUT requires an id for the document, as part of the URL
+# If we run the following we'll get an error
+#
+
+PUT /michelin/_doc
+{
+  "name": "Pfefferschiff",
+    "year": "2019",
+    "pin": {
+      "location": {
+        "lat": "47.83787",
+        "lon": "13.07917"
+        }
+      },
+    "city": "Hallwang",
+    "region": "Austria",
+    "zipCode": "5300",
+    "cuisine": "Classic cuisine",
+    "price": "$$$$$",
+    "url": "https://guide.michelin.com/at/en/salzburg-region/hallwang/restaurant/pfefferschiff",
+    "star": "1"
+ }
+
+# POST creates the document's ID for us
+
+POST /michelin/_doc
+{
+  "name": "Pfefferschiff",
+    "year": "2019",
+    "pin": {
+      "location": {
+        "lat": "47.83787",
+        "lon": "13.07917"
+        }
+      },
+    "city": "Hallwang",
+    "region": "Austria",
+    "zipCode": "5300",
+    "cuisine": "Classic cuisine",
+    "price": "$$$$$",
+    "url": "https://guide.michelin.com/at/en/salzburg-region/hallwang/restaurant/pfefferschiff",
+    "star": "1"
+ }
+
+# We can also specify it with PUT
+
+PUT /michelin/_doc/12345
+ {
+ "name": "Esszimmer",
+   "year": "2019",
+   "pin": {
+     "location": {
+       "lat": "47.80685",
+       "lon": "13.03409"
+       }
+     },
+  "city": "Salzburg",
+  "region": "Austria",
+  "zipCode": "5020",
+  "cuisine": "Creative",
+  "price": "$$$$$",
+  "url": "https://guide.michelin.com/at/en/salzburg-region/salzburg/restaurant/esszimmer",
+  "star": "1"
+ }
+
+# Indexing the document automatically created the index for us, named "michelin"
+# When indexing a document, a "mapping" is dynamically created" A mapping is a per-index schema definition that contains:
+#  names of fields
+#  data types of fields
+#  how the field should be indexed and stored
+
+GET /michelin/_mapping
+
+# more on this later
+# When you need to index a lot of docs, you should use the bulk API, you may see signficant performance benefits
+# From the registration page, open the file called 2019_michelin_restaurants and copy the contents or you can use the smaller sample data below:
+
+POST _bulk
+{"index":{"_index":"michelin"}}
+{"name":"KilianStuba","year":"2019","pin":{"location":{"lat":"47.34858","lon":"10.17114"}},"city":"Kleinwalsertal","region":"Austria","zipCode":"87568","cuisine":"Creative","price":"$$$$$","url":"https://guide.michelin.com/at/en/vorarlberg/kleinwalsertal/restaurant/kilian-stuba","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Pfefferschiff","year":"2019","pin":{"location":{"lat":"47.83787","lon":"13.07917"}},"city":"Hallwang","region":"Austria","zipCode":"5300","cuisine":"Classic cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/salzburg-region/hallwang/restaurant/pfefferschiff","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Esszimmer","year":"2019","pin":{"location":{"lat":"47.80685","lon":"13.03409"}},"city":"Salzburg","region":"Austria","zipCode":"5020","cuisine":"Creative","price":"$$$$$","url":"https://guide.michelin.com/at/en/salzburg-region/salzburg/restaurant/esszimmer","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Carpe Diem","year": "2019","pin":{"location":{"lat":"47.80001","lon":"13.04006"}},"city":"Salzburg","region":"Austria","zipCode":"5020","cuisine":"Market cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/salzburg-region/salzburg/restaurant/carpe-diem","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Edvard","year":"2019","pin":{"location":{"lat":"48.216503","lon":"16.36852"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Modern cuisine","price":"$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/edvard","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Das Loft","year":"2019","pin":{"location":{"lat":"48.21272","lon":"16.37931"}},"city":"Wien","region":"Austria","zipCode":"1020","cuisine":"Modern cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/das-loft","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Pramerl & the Wolf","year":"2019","pin":{"location":{"lat":"48.20945","lon":"16.37174"}},"city":"Wien","region":"Austria","zipCode":"1090","cuisine":"Creative","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/pramerl-the-wolf","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Walter Bauer","year":"2019","pin":{"location":{"lat":"48.20923","lon":"16.37672"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Classic cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/walter-bauer","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"SHIKI","year":"2019","pin":{"location":{"lat":"48.204067","lon":"16.37098"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Japanese","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/shiki","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Tian","year":"2019","pin":{"location":{"lat":"48.20513","lon":"16.37456"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Vegetarian","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/tian","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"aend","year":"2019","pin":{"location":{"lat":"48.18957","lon":"16.34115"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Modern cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/aend","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Le Ciel by Toni MÃ¶rwald","year":"2019","pin":{"location":{"lat":"48.20209","lon":"16.37156"}},"city":"Wien","region":"Austria","zipCode":"1010","cuisine":"Classic cuisine","price":"$$$$$","url":"https://guide.michelin.com/at/en/vienna/wien/restaurant/le-ciel-by-toni-morwald","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Chez TJ","year":"2019","pin":{"location":{"lat":"37.39468","lon":"-122.08044"}},"city":"SanFrancisco","region":"California","zipCode":"94041","cuisine":"Contemporary","price":"$$$$","url":"https://guide.michelin.com/us/en/california/south-san-francisco/restaurant/chez-tj","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"ProtÃ©gÃ©","year":"2019","pin":{"location":{"lat":"37.427853","lon":"-122.14362"}},"city":"San Francisco","region":"California","zipCode":"94301","cuisine":"Contemporary","price":"$$$","url":"https://guide.michelin.com/us/en/california/south-san-francisco/restaurant/protege","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Madera","year":"2019","pin":{"location":{"lat":"37.42014","lon":"-122.21151"}},"city":"San Francisco","region":"California","zipCode":"94025","cuisine":"Contemporary","price":"$$$","url":"https://guide.michelin.com/us/en/california/san-francisco/restaurant/madera","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"The Village Pub","year":"2019","pin":{"location":{"lat":"37.42897","lon":"-122.25178"}},"city":"San Francisco","region":"California","zipCode":"94062","cuisine":"Contemporary","price":"$$$","url":"https://guide.michelin.com/us/en/california/san-francisco/restaurant/the-village-pub","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"MingCourt","year":"2019","latitude":"22.318314","longitude":"114.16933","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/ming-court","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"YatTungHeen(Jordan)","year":"2019","latitude":"22.308014","longitude":"114.17147","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/yat-tung-heen-jordan","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"FuHo(TsimShaTsui)","year":"2019","latitude":"22.3022","longitude":"114.17194","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/fu-ho-tsim-sha-tsui","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"ShangPalace","year":"2019","latitude":"22.297325","longitude":"114.177155","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/shang-palace","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"IMTeppanyaki&Wine","year":"2019","latitude":"22.280807","longitude":"114.19211","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Teppanyaki","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/im-teppanyaki-wine","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"AhYatHarbourView(TsimShaTsui)","year":"2019","latitude":"22.296984","longitude":"114.17197","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/ah-yat-harbour-view-tsim-sha-tsui","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Rech","year":"2019","latitude":"22.293434","longitude":"114.174034","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Seafood","price":"$$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/rech","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"SpringMoon","year":"2019","latitude":"22.294943","longitude":"114.17182","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/spring-moon","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"ImperialTreasureFineChineseCuisine","year":"2019","latitude":"22.296177","longitude":"114.170006","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/imperial-treasure-fine-chinese-cuisine","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Sushi Tokami","year":"2019","latitude":"22.296112","longitude":"114.16916","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Sushi","price":"$$$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/sushi-tokami","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Tosca","year":"2019","latitude":"22.30357","longitude":"114.16007","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Italian","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/tosca352519","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Ã‰pure","year":"2019","latitude":"22.29583","longitude":"114.169304","city":"","region":"Hong Kong","zipCode":"N/A","cuisine":"French","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/epure","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"YeeTungHeen","year":"2019","latitude":"22.282295","longitude":"114.184135","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/yee-tung-heen","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"YÃ¨Shanghai(TsimShaTsui)","year":"2019","latitude":"22.295143","longitude":"114.168236","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Shanghainese","price":"$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/ye-shanghai-tsim-sha-tsui","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Ho Hung Kee","year":"2019","latitude":"22.280058","longitude":"114.18364","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Noodlesandcongee","price":"$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/ho-hung-kee","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Jardinde Jade(WanChai)","year":"2019","latitude":"22.28025","longitude":"114.17716","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Shanghainese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/jardin-de-jade-wan-chai","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"ZhejiangHeen","year":"2019","latitude":"22.2787","longitude":"114.17763","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Shanghainese","price":"$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/zhejiang-heen","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"TakumibyDaisukeMori","year":"2019","latitude":"22.276512","longitude":"114.17718","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Innovative","price":"$$$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/takumi-by-daisuke-mori","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Kam'sRoastGoose","year":"2019","latitude":"22.277693","longitude":"114.175385","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"CantoneseRoastMeats","price":"$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/kam-s-roast-goose","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Pang'sKitchen","year":"2019","latitude":"22.26921","longitude":"114.18452","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Cantonese","price":"$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/pang-s-kitchen","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"XinRongJi","year":"2019","latitude":"22.278013","longitude":"114.17273","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Taizhou","price":"$$$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/xin-rong-ji","star":"1"}
+{"index":{"_index":"michelin"}}
+{"name":"Qi(WanChai)","year":"2019","latitude":"22.276443","longitude":"114.17126","city":"Hong Kong","region":"Hong Kong","zipCode":"N/A","cuisine":"Sichuan","price":"$","url":"https://guide.michelin.com/hk/en/hong-kong-region/hong-kong/restaurant/qi-wan-chai","star":"1"}
+
+#
+# Notice there is an action then the document then the next action.
+# More info:https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-bulk.html
+#
+# Another option to index data: you can also upload a file. Navigate to Kibana Home select "Upload a file". Notice you can use csv tsv Newline-delimited JSON or Log files with a common format for the timestamp
+# From the registration page, download the file called csv_2019_restaurants.csv and Select or drag and drop a file
+# You can also select Home > Integrations and follow along how to install a light weight data shipper like Elastic Agent or Beats. For the sake of time I pre-recorded a sped up video of installation
+# Okay Let's go back to executing our basic search
+#____________________________________________________________________________
+# Find *all* documents
+
+GET /michelin/_search
+
+#
+# Let's find all restaurants that are Mexican
+#
+
+GET /michelin/_search
+{
+  "query": {
+    "match": {
+      "cuisine": "Mexican"
+    }
+  }
+}
+
+# Let's look for restaurants located in San Francisco
+# Since San Francisco is two words, we'll use match_phrase
+
+GET /michelin/_search
+{
+  "query": {
+    "match_phrase": {
+      "city": "San Francisco"
+    }
+  }
+}
+
+# Results are ranked by "relevance" (_score) because Elasticsearch is a search engine unlike relational dbs
+# More info: hhttps://www.elastic.co/blog/how-to-improve-elasticsearch-search-relevance-with-boolean-queries | https://www.elastic.co/blog/easier-relevance-tuning-elasticsearch-7-0 | 
+#
+
+__________________________________________________
+# We can also do boolean combinations of queries
+# Let's find all docs with "mexican" and "san francisco"
+
+GET /michelin/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "cuisine": "Mexican"
+          }
+        },
+       {
+         "match_phrase": {
+           "city": "San Francisco"
+         }
+       }
+      ]
+    }
+  }
+}
+
+#
+# Interesting we only get one result... I wonder if we expand our search we'll find more. If you notice in the data, there is no mention of state or country but michelin has "region" So we'll use California
+#
+
+GET /michelin/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "cuisine": "Mexican"
+          }
+        },
+       {
+         "match_phrase": {
+           "region": "California"
+         }
+       }
+      ]
+    }
+  }
+}
+
+#
+# Ok we got two results but notice we also returned the same result "californios"
+# We can also negate parts of a query, cuisine without "Mexican" in the name (maybe you hate Mexican)
+#
+
+GET /michelin/_search
+{
+  "query": {
+    "bool": {
+      "must_not": [
+        {
+          "match": {
+            "cuisine": "Mexican"
+          }
+        }]
+  }
+}
+}
+
+# Maybe you want to see all restaurants in California that are not Mexican
+
+GET /michelin/_search
+{
+  "query": {
+    "bool": {
+      "must_not": [
+        {
+          "match": {
+            "cuisine": "Mexican"
+          }
+        }],
+        "must": [
+          {"match": {
+            "region": "California"
+          }}
+        ]
+  }
+}
+}
+
+#__________________________________________________
+# Combinations can be boosted for different effects
+# Let's emphasize places with the cuisine "Contemporary"
+
+GET /michelin/_search
+{
+	"query": {
+		"bool": {
+			"should": [{
+					"match_phrase": {
+						"cuisine": {
+							"query": "Contemporary",
+							"boost": 3
+						}
+					}
+				},
+				{
+					"match_phrase": {
+						"city": {
+							"query": "san francisco"
+						}
+					}
+				}
+			]
+		}
+	}
+}
+
+# Sometimes it's unclear what actually matched.
+# We can highlight the matching fragments:
+
+GET /michelin/_search
+{
+  "query": {
+    "match": {
+      "cuisine": "Contemporary"
+    }
+  },
+  "highlight": {
+    "fields": {
+      "cuisine": {}
+    }
+  }
+}
+
+#__________________________________________________
+# Finally, we can perform filtering, when we don't need text analysis (or need to do exact matches, range queries, etc.)
+# Let's find restaurants with a star greater than 2
+
+GET /michelin/_search
+{
+	"query": {
+		"range": {
+			"star": {
+				"gte": 1
+			}
+		}
+	},
+	"sort": [{
+		"star": "desc"
+	}]
+}
+
+# Notice we got an error that the fielddata on star is disabled. We can enable fielddata on an existing star field my modifying the mapping
+# Settings within the inedex typically can be changed via an update API like this: 
+
+PUT /michelin/_mapping
+{
+  "properties": {
+    "star": {
+      "type": "text",
+      "fielddata" : "true"
+    }
+  }
+}
+
+# Fields and values can't be changed via an update API. We'll touch on this later. 
+# Now lets run that command again
+#
+GET /michelin/_search
+{
+	"query": {
+		"range": {
+			"star": {
+				"gte": 1
+			}
+		}
+	},
+	"sort": [{
+		"star": "desc"
+	}]
+}
+
+#
+# Much better.
+# We can also sort our results by michelin star using SQL
+# Sample SQL Query with Elasticsearch
+#
+
+POST /_sql?format=txt
+{ "query": "SELECT name, star FROM michelin ORDER BY star DESC LIMIT 500"
+}
+
+# Multiple methods to query Elasticsearch with SQL
+# - Through the rest endpoints (as seen above)
+# - Through the included CLI tool in the /bin directory of Elasticsearch
+# - JDBC Elasticsearch client
+# More details can be found here: https://www.elastic.co/what-is/elasticsearch-sql
+# Aggregations (one use case is faceting data) is very interesting
+# We won't have time to cover aggregation in depth, but I want to get you familiar with how they work, so you can use them on your own
+# We are going to switch to another data set to quickly show the power of aggregations and get something similar to the facets you would see in an ecommerce site like ebay
+# Example: 
+# https://www.ebay.com/sch/i.html?_from=R40&_trksid=p2380057.m570.l1313.TR12.TRC2.A0.H0.Xwatch.TRS0&_nkw=watch&_sacat=0
+# In Kibana lets go to home then select try sample data. Select other sample data sets. Select Add data for Sample eCommerce orders. Once this has been done select view data "Discover"
+# Discover is a great tool to quickly view our data. We are going to use the field products.price for our aggregation. Let's switch back to dev tools.
+# Select the hamburger menu then select ome then scroll down under management and select dev tools and be sure to scroll back down to line 488.
+
+GET /kibana_sample_data_ecommerce/_search
+{
+	"query": {
+		"bool": {
+			"must": [{
+				"match": {
+					"products.category": "Men's Shoes"
+				}
+			}]
+		}
+	},
+		"aggs": {
+			"price_ranges": {
+				"range": {
+					"field": "products.price",
+					"ranges": [{
+							"to": 100.0
+						},
+						{
+							"from": 100.0,
+							"to": 200.0
+						},
+						{
+							"from": 200.0
+						}
+					]
+				}
+			}
+		}
+	}
+
+# We can also see something similiar within Kibana in a cool view. Within Kibana if we select the hamburger menu and under Analytics select Discover. Then we can select field statistics and expand products.price to see the statistics of each field.
+#
+# Geo search is another powerful tool for search and Elasticsearch is a geo power house. Since we have geo data in our previous data (michelin) we'll switch back.
+# So let's find restaurants closest to us!
+# We have the geo point within the document, let's use it
+
+GET /michelin/_search
+
+# Let's execute the follow geo query, to sorted restaurants by distance. I found my geo coordinates (latitude, longitude) and plugged them below
+
+GET /michelin/_search
+{
+  "query": {
+    "match": {
+      "cuisine.keyword": "Contemporary"
+    }
+  },
+  "sort": [
+    {
+      "_geo_distance": {
+        "order": "asc",
+        "pin.location": {
+          "lat": 39.802765,
+          "lon": -105.087486
+        }
+      }
+    }
+  ]
+}
+
+# Error! Well Elasticsearch doesn't know the field is a geopoint. 
+# We must define this field as a geo point within mappings
+# Mapping are helpful for defining the structure of our document, and more efficiently storing/searching the data within our index
+# We have numbers/dates/strings, and geopoints, let's see what elasticsearch thinks our mapping is
+
+GET /michelin/_mapping
+
+# Elasticsearch by default is schema on write. So if we need to change the mapping we could create a new index with a new mapping then _reindex the data.
+#
+# Let's change the mapping, create a new index with the new mapping and _reindex our from the old index to the new index
+
+PUT /michelin2
+{
+  "mappings": {
+    "properties": {
+      "city": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "cuisine": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "name": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "pin": {
+        "properties": {
+          "location": {
+            "type": "geo_point"
+        }
+        }
+      },
+      "price": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "region": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "star": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "url": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "year": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "zipCode": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      }
+    }
+  }
+}
+
+# We can now use the _reindex API to index our data into the new index 
+
+POST /_reindex
+{"source": {
+  "index": "michelin"
+  },
+  "dest": {
+    "index": "michelin2"
+  }
+} 
+
+# Now we can execute our original geo query
+
+GET /michelin2/_search
+{
+  "query": {
+    "match": {
+      "cuisine.keyword": "Contemporary"
+    }
+  },
+  "sort": [
+    {
+      "_geo_distance": {
+        "order": "asc",
+        "pin.location": {
+          "lat": 39.802765,
+          "lon": -105.087486
+        }
+      }
+    }
+  ]
+}
+
+# What if we want to find the cheapest and closest michelin restaraunt to me?
+
+GET /michelin2/_search
+{
+  "query": {
+    "match": {
+      "price.keyword": "$"
+    }
+  },
+  "sort": [
+    {
+      "_geo_distance": {
+        "order": "asc",
+        "pin.location": {
+          "lat": 39.802765,
+          "lon": -105.087486
+        }
+      }
+    }
+  ]
+}
+
+# That was a very short introduction to geo queries, the goal was to get your feet wet to hopefuly go off and learn more
+# Let's finish the CRUD components, we covered C, and R, let's show how to update and delete documents
+# Let's add a flagged field to one of our documents, using a partial document update. For this excersize we are going to bulk ingest data and specifying the document id so you can see what we changed
+
+POST /_bulk
+{"index":{"_index":"inspections", "_id" : "1"}}
+{"business_address":"315 California St","business_city":"San Francisco","business_id":"24936","business_latitude":"37.793199","business_location":{"type":"Point","coordinates":[-122.400152,37.793199]},"business_longitude":"-122.400152","business_name":"San Francisco Soup Company","business_postal_code":"94104","business_state":"CA","inspection_date":"2016-06-09T00:00:00.000","inspection_id":"24936_20160609","inspection_score":"77","inspection_type":"Routine - Unscheduled","risk_category":"Low Risk","violation_description":"Improper food labeling or menu misrepresentation","violation_id":"24936_20160609_103141"}
+{"index":{"_index":"inspections", "_id" : "2"}}
+{"create": {"business_address":"10 Mason St","business_city":"San Francisco","business_id":"60354","business_latitude":"37.783527","business_location":{"type":"Point","coordinates":[-122.409061,37.783527]},"business_longitude":"-122.409061","business_name":"Soup Unlimited","business_postal_code":"94102","business_state":"CA","inspection_date":"2016-11-23T00:00:00.000","inspection_id":"60354_20161123","inspection_type":"Routine","inspection_score":"95"}}
+{"index":{"_index":"inspections", "_id" : "3"}}
+{"create": {"business_address":"2872 24th St","business_city":"San Francisco","business_id":"1797","business_latitude":"37.752807","business_location":{"type":"Point","coordinates":[-122.409752,37.752807]},"business_longitude":"-122.409752","business_name":"TIO CHILOS GRILL","business_postal_code":"94110","business_state":"CA","inspection_date":"2016-07-05T00:00:00.000","inspection_id":"1797_20160705","inspection_score":"90","inspection_type":"Routine - Unscheduled","risk_category":"Low Risk","violation_description":"Unclean nonfood contact surfaces","violation_id":"1797_20160705_103142"}}
+{"index":{"_index":"inspections", "_id" : "4"}}
+{"create": {"business_address":"1661 Tennessee St Suite 3B","business_city":"San Francisco Whard Restaurant","business_id":"66198","business_latitude":"37.75072","business_location":{"type":"Point","coordinates":[-122.388478,37.75072]},"business_longitude":"-122.388478","business_name":"San Francisco Restaurant","business_postal_code":"94107","business_state":"CA","inspection_date":"2016-05-27T00:00:00.000","inspection_id":"66198_20160527","inspection_type":"Routine","inspection_score":"56"} }
+{"index":{"_index":"inspections", "_id" : "5"}}
+{"create":{"business_address":"2162 24th Ave","business_city":"San Francisco","business_id":"5794","business_latitude":"37.747228","business_location":{"type":"Point","coordinates":[-122.481299,37.747228]},"business_longitude":"-122.481299","business_name":"Soup House","business_phone_number":"+14155752700","business_postal_code":"94116","business_state":"CA","inspection_date":"2016-09-07T00:00:00.000","inspection_id":"5794_20160907","inspection_score":"96","inspection_type":"Routine - Unscheduled","risk_category":"Low Risk","violation_description":"Unapproved or unmaintained equipment or utensils","violation_id":"5794_20160907_103144"} }
+{"index":{"_index":"inspections", "_id" : "6"}}
+{"create":{"business_address":"2162 24th Ave","business_city":"San Francisco","business_id":"5794","business_latitude":"37.747228","business_location":{"type":"Point","coordinates":[-122.481299,37.747228]},"business_longitude":"-122.481299","business_name":"Soup-or-Salad","business_phone_number":"+14155752700","business_postal_code":"94116","business_state":"CA","inspection_date":"2016-09-07T00:00:00.000","inspection_id":"5794_20160907","inspection_score":"96","inspection_type":"Routine - Unscheduled","risk_category":"Low Risk","violation_description":"Unapproved or unmaintained equipment or utensils","violation_id":"5794_20160907_103144"} }
+
+GET /inspections/_search
+
+POST /inspections/_update/5
+{
+ "doc" : {
+ "flagged" : true,
+ "views": 0
+ }
+}
+
+GET /inspections/_search
+
+# Notice when we go back and search for doc 5. it is now after doc 6. This is because when we update the document, we actualy don't update document 5 but we hide the original and create a new document 5. This is because Elasticsearch is a schema on write by default.
+# Elasticsearch also has a way to change the fields on the fly with a feature called runtime fields or schema on read. Lets create a new index template. Index templates is a way to tell Elasticsearch how to configure an index when it is created. This is helpful for indexing time series data 
+# as when a new days worth of logs are sent to Elasticsearch, the index will have the correct mapping settings. In this index template, we've defined two fields, timestamp and response_code, which will be created when we ingest the data. We've also defined a dynamic runtime field mapping. Any other 
+# fields will be runtime fields.
+
+PUT _index_template/my_dynamic_index
+{
+ "index_patterns": [
+ "my_dynamic_index-*"
+ ],
+ "template": {
+ "mappings":{
+ "dynamic": "runtime",
+ "properties": {
+ "timestamp": {
+ "type": "date",
+ "format": "yyyy-MM-dd"
+ },
+ "response_code": {
+ "type": "integer"
+ }
+ }
+ }
+ }
+}
+
+#
+# In this mapping we have specified that any new field that is unexpected arrive, Elasticsearch will dynamicaly create it and as a runtime field.
+#
+
+# The data weâ€™ve ingested has three fields: timestamp, #response code, and new_tla. In the past, new_tla wouldnâ€™t have been added because it wasnâ€™t defined in the index template. Now itâ€™s just treated as a runtime field.
+
+POST my_dynamic_index-1/_bulk
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-1"}
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-2"}
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-3"}
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-4"}
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-5"}
+{"index": {}}
+{"timestamp": "2021-04-02", "response_code": 200, "new_tla": "data-6"}
+
+# Here weâ€™re running a normal search query for new_tla. A query can also be run with both an indexed field like response_code and a runtime field like new_tla.
+
+GET my_dynamic_index-1/_search
+{
+ "query": {
+ "match": {
+ "new_tla": "data-1"
+ }
+ }
+ }
+
+# Together, we can have both schema on read and write togeter. Not every setting within the index can be changed so best read up more here: https://www.elastic.co/guide/en/elasticsearch/reference/current/runtime-mapping-fields.html#runtime-fields-scriptless
+
+# To delete a document, we can just pass the document id to the DELETE API
+
+DELETE /inspections/_doc/5
+
+GET /inspections/_search
+
+# That completed the CRUD section. I know we are running out of time but I want to cover one more aspect,
+# - Analyzers
+# Text analysis is one of the cores to Elasticsearch, and very important to understand. Text analysis enables Elasticsearch to perform full-text search, where the search returns all relevant results rather than just exact matches. If you search for Quick fox jumps, you probably want the document that 
+# contains A quick brown fox jumps over the lazy dog, and you might also want documents that contain related words like fast fox or foxes leap.
+
+# An analyzer â€‰â€”â€‰whether built-in or customâ€‰â€”â€‰is just a package which contains three lower-level building blocks: character filters, tokenizers, and token filters. The built-in analyzers pre-package these building blocks into analyzers suitable for different languages and types of text. Elasticsearch 
+# also exposes the individual building blocks so that they can be combined to define new custom analyzers
+#
+# Analysis = tokenization + token filters
+# Tokenization breaks sentences into discrete tokens
+
+GET /michelin/_analyze
+{
+  "tokenizer": "standard",
+  "text": "my email address test123@company.com"
+}
+
+GET /michelin/_analyze
+{
+ "tokenizer": "whitespace",
+ "text": "my email address test123@company.com"
+}
+
+GET /inspections/_analyze
+{
+ "tokenizer": "standard",
+ "text": "Brown fox brown dog"
+}
+
+#
+# And filters manipulate those tokens
+#
+
+GET /inspections/_analyze
+{
+ "tokenizer": "standard",
+ "filter": ["lowercase"],
+ "text": "Brown fox brown dog"
+}
+
+#
+# There is a wide variety of filters.
+#
+
+GET /inspections/_analyze
+{
+ "tokenizer": "standard",
+ "filter": ["lowercase", "unique"],
+ "text": "Brown brown brown fox brown dog"
+}
+
+# More info: https://www.elastic.co/guide/en/elasticsearch/reference/current/analyzer-anatomy.html
+# End?
