@@ -1,9 +1,9 @@
-# COSMOS to Elasticsearch Pipeline Architecture (Async Stack)
+# COSMOS to Elasticsearch Pipeline Architecture (Async Streaming Stack)
 
 ## Architecture Overview
 
 This document outlines the architecture for a modular, extensible, and parallelized pipeline that:
-1. Fetches URL metadata from the COSMOS API
+1. Streams URL metadata from the COSMOS API in memory-efficient batches
 2. Downloads HTML content from these URLs
 3. Processes the HTML content
 4. Indexes the processed content in Elasticsearch
@@ -37,12 +37,13 @@ class CosmosAPIClient:
         self.base_url = base_url
         self.session = None
         
-    async def get_collection_urls(self, collection_name, batch_size=100):
-        """Fetch all URLs for a specific collection with pagination."""
+    async def stream_collection_urls(self, collection_name, batch_size=100):
+        """Stream URLs for a specific collection, yielding batches to conserve memory."""
 ```
 
-- Responsible for fetching URL metadata from the COSMOS API
-- Implements pagination to retrieve all URLs for a given collection
+- Streams URL metadata from the COSMOS API in batches using async generators
+- Handles pagination internally, yielding each page as a batch
+- Memory-efficient design that can handle arbitrarily large collections
 - Provides filtering capabilities based on metadata
 
 ### 2. Async HTML Downloader
@@ -75,8 +76,8 @@ class HTMLProcessor:
     def __init__(self, plugins=None):
         self.plugins = plugins or []
         
-    async def process(self, url, html_content, metadata):
-        """Process HTML content and prepare it for indexing."""
+    async def process_batch(self, downloaded_batch):
+        """Process a batch of HTML content and prepare it for indexing."""
 ```
 
 - Extracts and processes relevant content from HTML using BeautifulSoup4
@@ -123,40 +124,42 @@ class Pipeline:
         """Run the complete pipeline for a collection."""
 ```
 
-- Coordinates the flow of data between components
-- Manages concurrency and batching
+- Coordinates the streaming flow of data between components
+- Processes each batch independently as it arrives
+- Manages concurrency and batch processing
 - Handles error propagation and recovery
 - Provides monitoring and logging
 
-## Asynchronous Processing Strategy
+## Asynchronous Streaming Strategy
 
-The system uses Python's `asyncio` for efficient concurrency:
+The system uses Python's `asyncio` and generator patterns for efficient streaming:
 
-- **Task Batching**: Process URLs in configurable batches (default 20)
+- **Memory-Efficient Streaming**: Process URL metadata in batches without loading entire dataset
+- **Batch Processing**: Handle each batch independently through the pipeline
 - **Semaphore Limiting**: Limit concurrent network requests to prevent overloading
 - **Connection Pooling**: Reuse HTTP and Elasticsearch connections
-- **Parallel Processing**: Use `asyncio.gather()` for true parallelism
+- **Parallel Processing**: Use `asyncio.gather()` for parallel processing within each batch
 
 ```python
-async def process_batch(self, url_batch):
-    # Download HTML concurrently
-    download_results = await self.downloader.download_batch(url_batch)
+async def run(self, collection_name):
+    """Run the complete pipeline for a collection using streaming approach."""
     
-    # Process HTML concurrently
-    processing_tasks = [
-        self.processor.process(result['url'], result['html'], result['metadata']) 
-        for result in download_results if result['html']
-    ]
-    processed_results = await asyncio.gather(*processing_tasks)
-    
-    # Index in Elasticsearch
-    await self.es_client.index_batch(processed_results)
+    async for url_batch in self.cosmos_client.stream_collection_urls(collection_name, self.batch_size):
+        # Download HTML for this batch concurrently
+        downloaded_batch = await self.downloader.download_batch(url_batch)
+        
+        # Process the downloaded content
+        processed_batch = await self.processor.process_batch(downloaded_batch)
+        
+        # Index the processed content
+        await self.es_client.index_batch(processed_batch)
 ```
 
 ## Error Handling & Resilience
 
 - **Retries with Backoff**: Implements exponential backoff for transient failures
-- **Partial Batch Processing**: Continue processing valid items even if some fail
+- **Per-Batch Error Handling**: Errors in one batch don't affect processing of other batches
+- **Partial Batch Processing**: Continue processing valid items even if some in a batch fail
 - **Dead Letter Queue**: Store failed items for later inspection
 - **Detailed Logging**: Comprehensive error information for debugging
 
@@ -197,11 +200,12 @@ async def main():
         cosmos_api_url="https://sde-indexing-helper.nasa-impact.net/candidate-urls-api",
         elasticsearch_host="https://my-elasticsearch-project-ce58cf.es.us-east-1.aws.elastic.cloud:443",
         elasticsearch_index="sde_index_custom_scraper",
-        concurrency=10
+        concurrency=10,
+        batch_size=20
     )
     
     # Process a specific collection
-    collections = ["IAU Minor Planet System"]
+    collections = ["iau_minor_planet_system"]
     for collection in collections:
         await pipeline.run(collection)
 
