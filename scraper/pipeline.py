@@ -44,26 +44,80 @@ class Pipeline:
             elasticsearch_api_key: API key for Elasticsearch authentication
             concurrency: Maximum number of concurrent downloads
             batch_size: Number of URLs to process in each batch
-            logger: Logger implementation to use (if None, ConsoleLogger will be used)
+            logger: Logger implementation to use for the pipeline itself
         """
-        # Set up logger
+        # Set up the pipeline's own logger
         self.logger = (
             logger
             if logger is not None
             else ConsoleLogger(service_name="pipeline_orchestrator")
         )
 
-        # Initialize components
-        self.cosmos_client = CosmosAPIClient(cosmos_api_url, logger=self.logger)
+        # Create component-specific loggers
+        if isinstance(logger, ElasticsearchLogger):
+            # If ES logger was provided, create component-specific ones with the same config
+            es_host = logger.host
+            es_index_prefix = logger.index_prefix
+            es_api_key = logger.api_key
+
+            self.cosmos_logger = ElasticsearchLogger(
+                host=es_host,
+                index_prefix=es_index_prefix,
+                service_name="cosmos_api",
+                api_key=es_api_key,
+            )
+
+            self.downloader_logger = ElasticsearchLogger(
+                host=es_host,
+                index_prefix=es_index_prefix,
+                service_name="html_downloader",
+                api_key=es_api_key,
+            )
+
+            self.processor_logger = ElasticsearchLogger(
+                host=es_host,
+                index_prefix=es_index_prefix,
+                service_name="html_processor",
+                api_key=es_api_key,
+            )
+
+            self.es_client_logger = ElasticsearchLogger(
+                host=es_host,
+                index_prefix=es_index_prefix,
+                service_name="elasticsearch_client",
+                api_key=es_api_key,
+            )
+        else:
+            # For console logger or other types, create new ones with appropriate service names
+            log_level = "INFO"
+            if isinstance(logger, ConsoleLogger) and hasattr(logger, "logger"):
+                # Get log level from the provided logger if possible
+                log_level = logger.logger.level
+
+            self.cosmos_logger = ConsoleLogger(
+                service_name="cosmos_api", log_level=log_level
+            )
+            self.downloader_logger = ConsoleLogger(
+                service_name="html_downloader", log_level=log_level
+            )
+            self.processor_logger = ConsoleLogger(
+                service_name="html_processor", log_level=log_level
+            )
+            self.es_client_logger = ConsoleLogger(
+                service_name="elasticsearch_client", log_level=log_level
+            )
+
+        # Initialize components with their specific loggers
+        self.cosmos_client = CosmosAPIClient(cosmos_api_url, logger=self.cosmos_logger)
         self.downloader = AsyncHTMLDownloader(
-            concurrency_limit=concurrency, logger=self.logger
+            concurrency_limit=concurrency, logger=self.downloader_logger
         )
-        self.processor = HTMLProcessor(logger=self.logger)
+        self.processor = HTMLProcessor(logger=self.processor_logger)
         self.es_client = ElasticsearchClient(
             host=elasticsearch_host,
             index_name=elasticsearch_index,
             api_key=elasticsearch_api_key,
-            logger=self.logger,
+            logger=self.es_client_logger,
         )
         self.batch_size = batch_size
 
@@ -165,11 +219,21 @@ class Pipeline:
             raise
 
     async def close(self):
-        """Close all connections."""
+        """Close all connections and loggers."""
+        # Close component connections and loggers
         await self.cosmos_client.close()
         await self.downloader.close()
         await self.processor.close()
         await self.es_client.close()
+
+        # Close the component-specific loggers
+        await self.cosmos_logger.close()
+        await self.downloader_logger.close()
+        await self.processor_logger.close()
+        await self.es_client_logger.close()
+
+        # Close the pipeline's own logger
+        await self.logger.close()
 
 
 async def main():
@@ -216,25 +280,25 @@ async def main():
         "ELASTIC_HOST",
         "https://my-elasticsearch-project-ce58cf.es.us-east-1.aws.elastic.cloud:443",
     )
-    es_index = os.environ.get("ELASTIC_INDEX", "sde_index_custom_scraper")
+    es_index = os.environ.get("ELASTIC_INDEX", "sde")
     es_api_key = os.environ.get("ELASTIC_API_KEY")
     cosmos_api_url = os.environ.get(
         "COSMOS_API_URL",
         "https://sde-indexing-helper.nasa-impact.net/candidate-urls-api",
     )
 
-    # Set up logger
-    if args.log_type == "elasticsearch" and es_api_key:
+    # Set up pipeline logger
+    if args.log_type == "elasticsearch" and es_host and es_api_key:
         print("Using Elasticsearch logger")
         logger = ElasticsearchLogger(
             host=es_host,
             index_prefix="sde_logs",
-            service_name="pipeline",
+            service_name="pipeline_orchestrator",
             api_key=es_api_key,
         )
     else:
         print("Using Console logger")
-        logger = ConsoleLogger(service_name="pipeline", log_level="INFO")
+        logger = ConsoleLogger(service_name="pipeline_orchestrator", log_level="INFO")
 
     # Initialize pipeline
     pipeline = Pipeline(

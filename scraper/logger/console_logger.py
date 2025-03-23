@@ -31,8 +31,17 @@ class ConsoleLogger(LoggerInterface):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
-        # Set log level
-        level = getattr(logging, log_level.upper(), logging.INFO)
+        # Handle case where log_level is an integer
+        if isinstance(log_level, int):
+            level = log_level
+        else:
+            # Set log level from string
+            try:
+                level = getattr(logging, log_level.upper(), logging.INFO)
+            except AttributeError:
+                # If log_level doesn't have .upper() method, use INFO
+                level = logging.INFO
+
         self.logger.setLevel(level)
 
     def _format_metadata(self, **kwargs) -> str:

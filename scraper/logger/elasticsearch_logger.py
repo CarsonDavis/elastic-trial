@@ -13,6 +13,7 @@ class ElasticsearchLogger(LoggerInterface):
         host: str,
         index_prefix: str,
         service_name: str,
+        component: str = "general",
         api_key: Optional[str] = None,
     ):
         """Initialize the Elasticsearch logger.
@@ -26,6 +27,7 @@ class ElasticsearchLogger(LoggerInterface):
         self.host = host
         self.index_prefix = index_prefix
         self.service_name = service_name
+        self.component = component
         self.api_key = api_key
         self.client = None
 
