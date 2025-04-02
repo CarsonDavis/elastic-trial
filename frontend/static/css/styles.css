@@ -1,0 +1,22 @@
+/* Additional custom styles */
+.collection .collection-item .title {
+    font-size: 18px;
+    color: #1976d2;
+}
+
+.collection .collection-item .snippet {
+    color: #666;
+    margin-top: 5px;
+}
+
+.collection .collection-item .badge {
+    background-color: #e0e0e0;
+    color: #666;
+    border-radius: 4px;
+    padding: 2px 8px;
+}
+
+/* Spacing for document type filters */
+[type="checkbox"]+span {
+    padding-right: 20px;
+}

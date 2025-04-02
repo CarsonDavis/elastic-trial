@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Elasticsearch Vector Search</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="col s12">
+                <h3 class="center-align">Elasticsearch Vector Search</h3>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col s12">
+                <div class="input-field">
+                    <input id="search-input" type="text" class="validate">
+                    <label for="search-input">Search</label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col s12">
+                <p>Filter by Document Type:</p>
+                {% for doc_type in doc_types %}
+                <label>
+                    <input type="checkbox" class="doc-type-filter" value="{{ doc_type }}">
+                    <span>{{ doc_type }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col s12">
+                <div id="results-container">
+                    <!-- Search results will be displayed here -->
+                </div>
+                <div id="pagination" class="center-align">
+                    <!-- Pagination controls will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
